@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Abdul Basit Mobile Shop Ultimate Attendance System</title>
+
+<!-- jsPDF for PDF export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- Chart.js for chart -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{font-family:Arial;text-align:center;background:#1e3c72;color:white;}
+.box{background:#0008;margin:10px;padding:15px;border-radius:10px;}
+button{padding:10px;margin:5px;border:none;border-radius:8px;}
+.green{background:#00c853;} .red{background:#d50000;}
+input{padding:10px;margin:5px;width:80%;}
+canvas{background:#fff;margin-top:10px;}
+</style>
+</head>
+<body>
+
+<h2>🚀Abdul Basit Mobile Shop Ultimate Attendance System</h2>
+
+<div class="box">
+<input id="email" placeholder="Email">
+<input id="password" type="password" placeholder="Password">
+<button onclick="signup()">Signup</button>
+<button onclick="login()">Login</button>
+<button onclick="logout()">Logout</button>
+<p id="status"></p>
+</div>
+
+<div class="box">
+<button class="green" onclick="checkIn()">Check In</button>
+<button class="red" onclick="checkOut()">Check Out</button>
+</div>
+
+<div class="box">
+<h3>Manual Entry</h3>
+<input id="manualIn" type="time">
+<input id="manualOut" type="time">
+<button onclick="manual()">Save</button>
+</div>
+
+<div class="box">
+<h3>My Records</h3>
+<ul id="record"></ul>
+</div>
+
+<div class="box">
+<h3>Admin Dashboard</h3>
+<button onclick="loadAll()">Load All</button>
+<ul id="allRecords"></ul>
+</div>
+
+<div class="box">
+<h3>📊 Report</h3>
+<input type="date" id="fromDate">
+<input type="date" id="toDate">
+<button onclick="filterData()">Filter</button>
+<button onclick="downloadPDF()">📄 PDF</button>
+<button onclick="downloadExcel()">📁 Excel</button>
+<button onclick="makeChart()">📊 Chart</button>
+<ul id="report"></ul>
+<p id="salaryResult"></p>
+<canvas id="chart" width="400" height="200"></canvas>
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } 
+from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, where, doc, updateDoc } 
+from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+// 🔥 Firebase Config (यहाँ अपनी config डालें)
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY_HERE",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let userData = null;
+
+// DATE helper
+function today(){ return new Date().toISOString().split("T")[0]; }
+
+// AUTO LOGIN
+if(localStorage.getItem("uid")){
+  getUser().then(() => {
+    load();
+    status.innerHTML = "✅ Logged In";
+  });
+}
+
+// SIGNUP
+window.signup = async () => {
+  try {
+    const user = await createUserWithEmailAndPassword(auth, email.value, password.value);
+    const name = prompt("Enter Name");
+    await addDoc(collection(db,"users"),{
+      uid: user.user.uid,
+      name: name,
+      role: "employee"
+    });
+    localStorage.setItem("uid", user.user.uid);
+    await getUser();
+    load();
+    status.innerHTML = "✅ Account Created";
+  } catch(e) { alert(e.message); }
+}
+
+// LOGIN
+window.login = async () => {
+  try {
+    const user = await signInWithEmailAndPassword(auth, email.value, password.value);
+    localStorage.setItem("uid", user.user.uid);
+    await getUser();
+    load();
+    status.innerHTML = "✅ Logged In";
+  } catch(e){ alert(e.message); }
+}
+
+// LOGOUT
+window.logout = async () => {
+  await signOut(auth);
+  localStorage.removeItem("uid");
+  userData = null;
+  status.innerHTML = "✅ Logged Out";
+  record.innerHTML = "";
+}
+
+// GET USER
+async function getUser(){
+  const snap = await getDocs(collection(db,"users"));
+  snap.forEach(doc => {
+    const u = doc.data();
+    if(u.uid === localStorage.getItem("uid")) userData = u;
+  });
+}
+
+// CHECK IN
+window.checkIn = async () => {
+  if(!userData){ alert("Login first"); return; }
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const location = pos.coords.latitude + "," + pos.coords.longitude;
+    const q = query(collection(db,"attendance"),
+                    where("uid","==",localStorage.getItem("uid")),
+                    where("date","==",today()));
+    const snap = await getDocs(q);
+    if(!snap.empty){ alert("Already Checked In"); return; }
+    const docRef = await addDoc(collection(db,"attendance"),{
+      uid: localStorage.getItem("uid"),
+      name: userData.name,
+      date: today(),
+      checkIn: new Date().toLocaleTimeString(),
+      checkOut: "",
+      status: "Present",
+      location: location
+    });
+    localStorage.setItem("docId", docRef.id);
+    alert("Checked In with GPS");
+  });
+}
+
+// CHECK OUT
+window.checkOut = async () => {
+  const docId = localStorage.getItem("docId");
+  if(!docId){ alert("Check In first"); return; }
+  await updateDoc(doc(db,"attendance",docId), { checkOut: new Date().toLocaleTimeString() });
+  localStorage.removeItem("docId");
+  alert("Checked Out");
+}
+
+// MANUAL ENTRY
+window.manual = async () => {
+  if(!userData){ alert("Login first"); return; }
+  await addDoc(collection(db,"attendance"),{
+    uid: localStorage.getItem("uid"),
+    name: userData.name,
+    date: today(),
+    checkIn: manualIn.value,
+    checkOut: manualOut.value,
+    status: "Manual"
+  });
+}
+
+// LOAD USER RECORDS
+function load(){
+  const q = query(collection(db,"attendance"), where("uid","==",localStorage.getItem("uid")));
+  onSnapshot(q,(snap)=>{
+    let html="";
+    snap.forEach(d=>{
+      const r=d.data();
+      html += `<li>${r.date} | ${r.checkIn}-${r.checkOut} | ${r.status}</li>`;
+    });
+    record.innerHTML = html;
+  });
+}
+
+// ADMIN DASHBOARD
+window.loadAll = async () => {
+  if(userData?.role !== "admin"){ alert("Access Denied"); return; }
+  const snap = await getDocs(collection(db,"attendance"));
+  let html="";
+  snap.forEach(doc => {
+    const r = doc.data();
+    html += `<li>${r.name} | ${r.date} | ${r.checkIn}-${r.checkOut}</li>`;
+  });
+  allRecords.innerHTML = html;
+}
+
+// FILTER & SALARY
+window.filterData = async () => {
+  if(!userData){ alert("Login first"); return; }
+  const from = fromDate.value;
+  const to = toDate.value;
+  const q = query(collection(db,"attendance"), where("uid","==",localStorage.getItem("uid")));
+  const snap = await getDocs(q);
+  let html=""; let days=0;
+  window.filtered = [];
+  snap.forEach(doc=>{
+    const r = doc.data();
+    if(from && r.date<from) return;
+    if(to && r.date>to) return;
+    if(r.checkIn && r.checkOut) days++;
+    window.filtered.push(r);
+    html += `<li>${r.date} | ${r.checkIn}-${r.checkOut}</li>`;
+  });
+  report.innerHTML = html;
+  const salary = 30000, perDay = salary/30;
+  salaryResult.innerHTML = `Days: ${days} | Salary: ${(days*perDay).toFixed(0)}`;
+}
+
+// PDF
+window.downloadPDF = () => {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y=20;
+  doc.text("Attendance Report",20,y); y+=10;
+  window.filtered.forEach(r=>{
+    doc.text(`${r.date} ${r.checkIn}-${r.checkOut}`,10,y); y+=8;
+  });
+  doc.save("Report.pdf");
+}
+
+// EXCEL
+window.downloadExcel = () => {
+  let csv="Date,CheckIn,CheckOut\n";
+  window.filtered.forEach(r=>{ csv+=`${r.date},${r.checkIn},${r.checkOut}\n`; });
+  const blob=new Blob([csv],{type:"text/csv"});
+  const link=document.createElement("a");
+  link.href=URL.createObjectURL(blob);
+  link.download="attendance.csv";
+  link.click();
+}
+
+// CHART
+window.makeChart = () => {
+  const labels = window.filtered.map(r=>r.date);
+  new Chart(document.getElementById("chart"),{
+    type:"bar",
+    data:{ labels: labels, datasets:[{label:"Attendance", data: labels.map(()=>1)}] }
+  });
+}
+
+</script>
+</body>
+</html>
